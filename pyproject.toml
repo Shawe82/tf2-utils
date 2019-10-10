@@ -2,7 +2,7 @@
 name = "tf2-utils"
 version = "0.1.0"
 description = ""
-authors = ["Simon Hawe <shawe@munichre.com>"]
+authors = ["Simon Hawe <simon.hawe@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.7"
