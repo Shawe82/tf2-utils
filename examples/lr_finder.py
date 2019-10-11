@@ -30,5 +30,5 @@ if __name__ == '__main__':
     #              metrics=['accuracy'])
     # lrf = LRFinder(model=model, loss_fn=model.loss_functions[0], optimizer=model.optimizer)
 
-    lrf(dataset, 1e-6, 10, 100, 0.96)
-    lrf.plot_smoothed()
+    lr = lrf(dataset, 1e-6, 10, 100, 0.96)
+    lr.plot_smoothed()
