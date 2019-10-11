@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras
 
-from tf2_utils.lr_finder import Lr, lr_finder
+from tf2_utils.lr_finder import LrGenerator, lr_finder, SmoothedLoss
 
 if __name__ == '__main__':
     fashion_mnist = keras.datasets.fashion_mnist
@@ -30,6 +30,7 @@ if __name__ == '__main__':
     #loss_object = model.loss_functions[0]
     #optimizer = model.optimizer
 
-    lr_o = Lr(min_lr=1e-6, max_lr=10, n_steps=100, smoothing=0.96)
-    lr = lr_finder(model, optimizer, loss_object, dataset, lr_o)
+    lrs = LrGenerator(min_lr=1e-6, max_lr=10, n_steps=100)
+    losses = SmoothedLoss(0.96)
+    lr = lr_finder(model, optimizer, loss_object, dataset, lrs, losses)
     lr.plot_smoothed()
