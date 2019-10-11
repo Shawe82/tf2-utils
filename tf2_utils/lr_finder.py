@@ -35,8 +35,13 @@ class Lr:
     def no_progress(self) -> bool:
         return self.smoothed_losses[-1] > 4 * self.best_loss
 
-    def lr(self, step: int) -> float:
-        return self.min_lr * (self.max_lr / self.min_lr) ** (step / (self.n_steps - 1))
+    def __call__(self):
+        for step in range(self.n_steps):
+            yield self.min_lr * (self.max_lr / self.min_lr) ** (
+                step / (self.n_steps - 1)
+            )
+            if self.no_progress:
+                break
 
     def reset(self):
         self.lrs = []
@@ -99,20 +104,13 @@ def lr_finder(
     optimizer: tf.keras.optimizers.Optimizer,
     loss_fn: tf.keras.losses.Loss,
     dataset,
-    lr_o: Lr
+    learn_rates: Lr,
 ) -> Lr:
-    lr_o.reset()
-    for step, (source, target) in enumerate(tqdm(dataset, total=lr_o.n_steps)):
-        lr = lr_o.lr(step)  # Step 1 and Step 4
+    learn_rates.reset()
+    for lr, (source, target) in tqdm(
+        zip(learn_rates(), dataset), total=learn_rates.n_steps
+    ):
         loss = train_step(model, optimizer, loss_fn, source, target, lr).numpy()
-        lr_o.update(lr, loss)
+        learn_rates.update(lr, loss)
 
-        if step - 1 == lr_o.n_steps or lr_o.no_progress:
-            print(
-                "Stopping because of loss"
-                if lr_o.no_progress
-                else "Stopping because number of max steps have been reached"
-            )
-            break
-
-    return lr_o
+    return learn_rates
