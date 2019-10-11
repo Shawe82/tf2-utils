@@ -50,24 +50,42 @@ class LrGenerator:
             self._lrs.append(learning_rate)
             yield learning_rate
 
+    @property
+    def lrs(self) -> List[float]:
+        return self._lrs
+
 
 @dataclass
 class Lr:
     lr: LrGenerator
     loss: SmoothedLoss
-    _opt_idx: int = field(init=False, default=None)
+    _opt_idx_s: int = field(init=False, default=None)
+    _opt_idx_m: int = field(init=False, default=None)
 
     @property
-    def opt_idx(self):
+    def opt_idx_steep(self):
         cut = 3
-        if self._opt_idx is None:
+        if self._opt_idx_s is None:
             sls = np.array(self.loss._smoothed_losses)
-            self._opt_idx = np.argmin(sls[1 + cut :] - sls[cut:-1]) + 1 + cut
-        return self._opt_idx
+            self._opt_idx_s = np.argmin(sls[1 + cut :] - sls[cut:-1]) + 1 + cut
+        return self._opt_idx_s
 
     @property
-    def lr_opt(self):
-        return self.lr._lrs[self.opt_idx]
+    def opt_idx_mag(self):
+        if self._opt_idx_m is None:
+            idx_ = np.argmin(self.loss._smoothed_losses)
+            self._opt_idx_m = np.argmin(
+                np.abs(np.array(self.lr.lrs) - self.lr.lrs[idx_] / 10)
+            )
+        return self._opt_idx_m
+
+    @property
+    def lr_opt_s(self):
+        return self.lr.lrs[self.opt_idx_steep]
+
+    @property
+    def lr_opt_m(self):
+        return self.lr.lrs[self.opt_idx_mag]
 
     def plot(self):
         self._plt(False)
@@ -78,10 +96,16 @@ class Lr:
     def _plt(self, smoothed: bool = False, cut: int = 5):
         name = "Smoothed Loss" if smoothed else "Loss"
         loss = self.loss._smoothed_losses if smoothed else self.loss._losses
-        plt.plot(self.lr._lrs[cut:-cut], loss[cut:-cut])
-        plt.axvline(x=self.lr_opt, color="r")
+        plt.plot(self.lr.lrs[cut:-cut], loss[cut:-cut])
+        plt.axvline(x=self.lr_opt_s, color="r")
         plt.annotate(
-            f"Optimal LR {self.lr_opt:.4f}", xy=(self.lr_opt, loss[self.opt_idx])
+            f"Optimal LR Steep {self.lr_opt_s:.4f}",
+            xy=(self.lr_opt_s, loss[self.opt_idx_steep]),
+        )
+        plt.axvline(x=self.lr_opt_m, color="g")
+        plt.annotate(
+            f"Optimal LR Mag {self.lr_opt_m:.4f}",
+            xy=(self.lr_opt_m, loss[self.opt_idx_mag]),
         )
         plt.xlabel("Learning Rate")
         plt.ylabel(name)
@@ -100,7 +124,8 @@ def lr_finder(
     losses: SmoothedLoss,
 ) -> Lr:
     for lr, (source, target) in zip(learn_rates(), dataset):
-        loss = train_step(model, optimizer, loss_fn, source, target, lr).numpy()
+        tf.keras.backend.set_value(optimizer.lr, lr)
+        loss = train_step(model, optimizer, loss_fn, source, target).numpy()
         losses.update(loss)
         if losses.no_progress:
             break
@@ -108,11 +133,50 @@ def lr_finder(
     return Lr(learn_rates, losses)
 
 
+@dataclass
+class OneCycleLr:
+    n_epochs: int
+    n_batches: int
+    max_lr: float
+    lrs: List[float] = field(init=False)
+
+    def __call__(self):
+        self.lrs = []
+        cycle_length = self.n_batches * self.n_epochs
+        step_size = (cycle_length * 0.98) // 2
+        min_lr = self.max_lr / 10
+        rate = (self.max_lr - min_lr) / step_size
+
+        lr = min_lr
+        for step in tqdm(range(cycle_length)):
+            self.lrs.append(lr)
+            yield lr
+            lr = lr + rate if step < step_size else lr - rate
+            if step == (2 * step_size - 1):
+                rate = (min_lr - self.max_lr / 100) / (cycle_length - step - 2)
+
+
+def learner(
+    model: tf.keras.Model,
+    optimizer: tf.keras.optimizers.Optimizer,
+    loss_fn: tf.keras.losses.Loss,
+    dataset,
+    learn_rates: OneCycleLr,
+):
+
+    data_gen = (data for _ in range(learn_rates.n_epochs) for data in dataset)
+    losses = []
+    for lr, (source, target) in zip(learn_rates(), data_gen):
+        tf.keras.backend.set_value(optimizer.lr, lr)
+        loss = train_step(model, optimizer, loss_fn, source, target).numpy()
+        losses.append(loss)
+    return losses
+
+
 @tf.function
 def train_step(
-    model, optimizer, loss_fn, source: tf.Tensor, target: tf.Tensor, lr: float
+    model, optimizer, loss_fn, source: tf.Tensor, target: tf.Tensor
 ) -> tf.Tensor:
-    tf.keras.backend.set_value(optimizer.lr, lr)
     with tf.GradientTape() as tape:
         loss = loss_fn(target, model(source))
         grads = tape.gradient(loss, model.trainable_weights)
