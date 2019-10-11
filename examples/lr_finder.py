@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras
 
-from tf2_utils.lr_finder import LRFinder
+from tf2_utils.lr_finder import Lr, lr_finder
 
 if __name__ == '__main__':
     fashion_mnist = keras.datasets.fashion_mnist
@@ -22,13 +22,14 @@ if __name__ == '__main__':
     # With explicitly built loss objects and optimizer
     loss_object = tf.keras.losses.SparseCategoricalCrossentropy()
     optimizer = tf.keras.optimizers.Adam(1e-2)
-    lrf = LRFinder(model=model, loss_fn=loss_object, optimizer=optimizer)
 
     # With compiled model
     # model.compile(optimizer='adam',
     #              loss='sparse_categorical_crossentropy',
     #              metrics=['accuracy'])
-    # lrf = LRFinder(model=model, loss_fn=model.loss_functions[0], optimizer=model.optimizer)
+    #loss_object = model.loss_functions[0]
+    #optimizer = model.optimizer
 
-    lr = lrf(dataset, 1e-6, 10, 100, 0.96)
+    lr_o = Lr(min_lr=1e-6, max_lr=10, n_steps=100, smoothing=0.96)
+    lr = lr_finder(model, optimizer, loss_object, dataset, lr_o)
     lr.plot_smoothed()

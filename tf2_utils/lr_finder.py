@@ -11,18 +11,39 @@ class Lr:
     min_lr: float
     max_lr: float
     n_steps: int
+    smoothing: float = 1
     _opt_idx = None
     lrs = []
     losses = []
     smoothed_losses = []
+    avg_loss = 0
 
-    def update(self, lr, loss, smooth_loss):
+    def update(self, lr, loss):
+        self.avg_loss = self.smoothing * self.avg_loss + (1 - self.smoothing) * loss
+        smooth_loss = self.avg_loss / (
+            1 - self.smoothing ** (len(self.smoothed_losses) + 1)
+        )
+        self.best_loss = (
+            loss if len(self.losses) == 0 or loss < self.best_loss else self.best_loss
+        )
+
         self.lrs.append(lr)
         self.losses.append(loss)
         self.smoothed_losses.append(smooth_loss)
 
+    @property
+    def no_progress(self) -> bool:
+        return self.smoothed_losses[-1] > 4 * self.best_loss
+
     def lr(self, step: int) -> float:
         return self.min_lr * (self.max_lr / self.min_lr) ** (step / (self.n_steps - 1))
+
+    def reset(self):
+        self.lrs = []
+        self.losses = []
+        self.smoothed_losses = []
+        self._opt_idx = None
+        self.avg_loss = 0
 
     @property
     def opt_idx(self):
@@ -73,41 +94,25 @@ def train_step(
     return loss
 
 
-@dataclass
-class LRFinder:
-    model: tf.keras.Model
-    optimizer: tf.keras.optimizers.Optimizer
-    loss_fn: tf.keras.losses.Loss
+def lr_finder(
+    model: tf.keras.Model,
+    optimizer: tf.keras.optimizers.Optimizer,
+    loss_fn: tf.keras.losses.Loss,
+    dataset,
+    lr_o: Lr
+) -> Lr:
+    lr_o.reset()
+    for step, (source, target) in enumerate(tqdm(dataset, total=lr_o.n_steps)):
+        lr = lr_o.lr(step)  # Step 1 and Step 4
+        loss = train_step(model, optimizer, loss_fn, source, target, lr).numpy()
+        lr_o.update(lr, loss)
 
-    def __call__(
-        self,
-        dataset,
-        min_lr: float,
-        max_lr: float,
-        n_steps: int,
-        smoothing: float = 1.0,
-    ) -> Lr:
-        lr_o = Lr(min_lr=min_lr, max_lr=max_lr, n_steps=n_steps)
-        avg_loss = 0
+        if step - 1 == lr_o.n_steps or lr_o.no_progress:
+            print(
+                "Stopping because of loss"
+                if lr_o.no_progress
+                else "Stopping because number of max steps have been reached"
+            )
+            break
 
-        for step, (source, target) in enumerate(tqdm(dataset, total=n_steps)):
-            lr = lr_o.lr(step)  # Step 1 and Step 4
-            loss = train_step(
-                self.model, self.optimizer, self.loss_fn, source, target, lr
-            ).numpy()
-
-            avg_loss = smoothing * avg_loss + (1 - smoothing) * loss
-            smooth_loss = avg_loss / (1 - smoothing ** (step + 1))
-
-            best_loss = loss if step == 0 or loss < best_loss else best_loss
-            lr_o.update(lr, loss, smooth_loss)
-
-            if step - 1 == n_steps or smooth_loss > 4 * best_loss:
-                print(
-                    "Stopping because number of max steps have been reached"
-                    if step - 1 == n_steps
-                    else "Stopping because of loss"
-                )
-                break
-
-        return lr_o
+    return lr_o
