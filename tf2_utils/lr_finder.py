@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,28 +13,28 @@ class Lr:
     max_lr: float
     n_steps: int
     smoothing: float = 1
-    _opt_idx = None
-    lrs = []
-    losses = []
-    smoothed_losses = []
-    avg_loss = 0
+    _opt_idx: int = field(init=False)
+    _lrs: List[float] = field(init=False)
+    _losses: List[float] = field(init=False)
+    _smoothed_losses: float = field(init=False)
+    _avg_loss: float = field(init=False)
 
     def update(self, lr, loss):
-        self.avg_loss = self.smoothing * self.avg_loss + (1 - self.smoothing) * loss
-        smooth_loss = self.avg_loss / (
-            1 - self.smoothing ** (len(self.smoothed_losses) + 1)
+        self._avg_loss = self.smoothing * self._avg_loss + (1 - self.smoothing) * loss
+        smooth_loss = self._avg_loss / (
+            1 - self.smoothing ** (len(self._smoothed_losses) + 1)
         )
         self.best_loss = (
-            loss if len(self.losses) == 0 or loss < self.best_loss else self.best_loss
+            loss if len(self._losses) == 0 or loss < self.best_loss else self.best_loss
         )
 
-        self.lrs.append(lr)
-        self.losses.append(loss)
-        self.smoothed_losses.append(smooth_loss)
+        self._lrs.append(lr)
+        self._losses.append(loss)
+        self._smoothed_losses.append(smooth_loss)
 
     @property
     def no_progress(self) -> bool:
-        return self.smoothed_losses[-1] > 4 * self.best_loss
+        return self._smoothed_losses[-1] > 4 * self.best_loss
 
     def __call__(self):
         for step in range(self.n_steps):
@@ -44,17 +45,17 @@ class Lr:
                 break
 
     def reset(self):
-        self.lrs = []
-        self.losses = []
-        self.smoothed_losses = []
+        self._lrs = []
+        self._losses = []
+        self._smoothed_losses = []
         self._opt_idx = None
-        self.avg_loss = 0
+        self._avg_loss = 0
 
     @property
     def opt_idx(self):
+        leave_out = 3
         if self._opt_idx is None:
-            sls = np.array(self.smoothed_losses)
-            leave_out = 3
+            sls = np.array(self._smoothed_losses)
             self._opt_idx = (
                 np.argmin(sls[1 + leave_out :] - sls[leave_out:-1]) + 1 + leave_out
             )
@@ -62,7 +63,7 @@ class Lr:
 
     @property
     def lr_opt(self):
-        return self.lrs[self.opt_idx]
+        return self._lrs[self.opt_idx]
 
     def plot(self):
         self._plt(False)
@@ -72,8 +73,8 @@ class Lr:
 
     def _plt(self, smoothed: bool = False, cut: int = 5):
         name = "Smoothed Loss" if smoothed else "Loss"
-        loss = self.smoothed_losses if smoothed else self.losses
-        plt.plot(self.lrs[cut:-cut], loss[cut:-cut])
+        loss = self._smoothed_losses if smoothed else self._losses
+        plt.plot(self._lrs[cut:-cut], loss[cut:-cut])
         plt.axvline(x=self.lr_opt, color="r")
         plt.annotate(
             f"Optimal LR {self.lr_opt:.4f}", xy=(self.lr_opt, loss[self.opt_idx])
