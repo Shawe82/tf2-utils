@@ -6,7 +6,11 @@ import tensorflow as tf
 from tqdm import tqdm
 
 
+@dataclass
 class Lr:
+    min_lr: float
+    max_lr: float
+    n_steps: int
     _opt_idx = None
     lrs = []
     losses = []
@@ -17,12 +21,17 @@ class Lr:
         self.losses.append(loss)
         self.smoothed_losses.append(smooth_loss)
 
+    def lr(self, step: int) -> float:
+        return self.min_lr * (self.max_lr / self.min_lr) ** (step / (self.n_steps - 1))
+
     @property
     def opt_idx(self):
         if self._opt_idx is None:
             sls = np.array(self.smoothed_losses)
             leave_out = 3
-            self._opt_idx = np.argmin(sls[1 + leave_out:] - sls[leave_out:-1]) + 1 + leave_out
+            self._opt_idx = (
+                np.argmin(sls[1 + leave_out :] - sls[leave_out:-1]) + 1 + leave_out
+            )
         return self._opt_idx
 
     @property
@@ -50,21 +59,25 @@ class Lr:
         plt.grid()
         plt.show()
 
+
+@tf.function
+def train_step(
+    model, optimizer, loss_fn, source: tf.Tensor, target: tf.Tensor, lr: float
+) -> tf.Tensor:
+    tf.keras.backend.set_value(optimizer.lr, lr)
+    with tf.GradientTape() as tape:
+        loss = loss_fn(target, model(source))
+        grads = tape.gradient(loss, model.trainable_weights)
+
+    optimizer.apply_gradients(zip(grads, model.trainable_weights))
+    return loss
+
+
 @dataclass
 class LRFinder:
     model: tf.keras.Model
     optimizer: tf.keras.optimizers.Optimizer
     loss_fn: tf.keras.losses.Loss
-
-    @tf.function(experimental_relax_shapes=True)
-    def train_step(self, source: tf.Tensor, target: tf.Tensor, lr: float) -> tf.Tensor:
-        tf.keras.backend.set_value(self.optimizer.lr, lr)
-        with tf.GradientTape() as tape:
-            loss = self.loss_fn(target, self.model(source))
-            grads = tape.gradient(loss, self.model.trainable_weights)
-
-        self.optimizer.apply_gradients(zip(grads, self.model.trainable_weights))
-        return loss
 
     def __call__(
         self,
@@ -74,15 +87,14 @@ class LRFinder:
         n_steps: int,
         smoothing: float = 1.0,
     ) -> Lr:
-        lr_o = Lr()
+        lr_o = Lr(min_lr=min_lr, max_lr=max_lr, n_steps=n_steps)
         avg_loss = 0
 
-        def exp_annealing(step: int) -> float:
-            return min_lr * (max_lr / min_lr) ** (step / (n_steps - 1))
-
         for step, (source, target) in enumerate(tqdm(dataset, total=n_steps)):
-            lr = exp_annealing(step)  # Step 1 and Step 4
-            loss = self.train_step(source, target, lr).numpy()
+            lr = lr_o.lr(step)  # Step 1 and Step 4
+            loss = train_step(
+                self.model, self.optimizer, self.loss_fn, source, target, lr
+            ).numpy()
 
             avg_loss = smoothing * avg_loss + (1 - smoothing) * loss
             smooth_loss = avg_loss / (1 - smoothing ** (step + 1))
@@ -99,10 +111,3 @@ class LRFinder:
                 break
 
         return lr_o
-
-
-    def __hash__(self):
-        return hash(1)
-
-    def __eq__(self, other):
-        return True
