@@ -1,7 +1,13 @@
 import tensorflow as tf
 from tensorflow import keras
 
-from tf2_utils.lr_finder import LrGenerator, SmoothedLoss, OneCycleLr, lr_finder, learner
+from tf2_utils.lr_finder import (
+    LrGenerator,
+    SmoothedLoss,
+    OneCycleLr,
+    lr_finder,
+    learner,
+)
 
 if __name__ == "__main__":
     fashion_mnist = keras.datasets.fashion_mnist
@@ -11,6 +17,9 @@ if __name__ == "__main__":
     test_images = test_images / 255.0
 
     dataset = tf.data.Dataset.from_tensor_slices((train_images, train_labels)).batch(64)
+    dataset_test = tf.data.Dataset.from_tensor_slices((test_images, test_labels)).batch(
+        64
+    )
 
     model = keras.Sequential(
         [
@@ -39,6 +48,27 @@ if __name__ == "__main__":
     # lr.plot_smoothed()
 
     rater = OneCycleLr(
-        n_epochs=5, n_batches=tf.data.experimental.cardinality(dataset).numpy(), max_lr=lr.lr_opt_m
+        n_epochs=5,
+        n_batches=tf.data.experimental.cardinality(dataset).numpy(),
+        max_lr=lr.lr_opt_m,
     )
-    res = learner(model, optimizer, loss_object, dataset, rater)
+
+    class MyLossObject:
+        def __init__(self):
+            self.train_loss = tf.keras.metrics.Mean(name="train_loss")
+            self.test_loss = tf.keras.metrics.Mean(name="test_loss")
+
+        def finish_epoch(self, epoch):
+            print(
+                f"Epoch {epoch} Loss: {self.train_loss.result()} Test: {self.test_loss.result()}"
+            )
+            self.train_loss.reset_states()
+            self.test_loss.reset_states()
+
+        def update_train(self, loss):
+            self.train_loss(loss)
+
+        def update_test(self, loss):
+            self.test_loss(loss)
+
+    res = learner(model, optimizer, loss_object, dataset, rater, MyLossObject(), dataset_test)

@@ -1,10 +1,12 @@
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
+
+from tf2_utils.utils import train_step, test_step
 
 
 @dataclass
@@ -115,24 +117,6 @@ class Lr:
         plt.show()
 
 
-def lr_finder(
-    model: tf.keras.Model,
-    optimizer: tf.keras.optimizers.Optimizer,
-    loss_fn: tf.keras.losses.Loss,
-    dataset,
-    learn_rates: LrGenerator,
-    losses: SmoothedLoss,
-) -> Lr:
-    for lr, (source, target) in zip(learn_rates(), dataset):
-        tf.keras.backend.set_value(optimizer.lr, lr)
-        loss = train_step(model, optimizer, loss_fn, source, target).numpy()
-        losses.update(loss)
-        if losses.no_progress:
-            break
-
-    return Lr(learn_rates, losses)
-
-
 @dataclass
 class OneCycleLr:
     n_epochs: int
@@ -156,30 +140,46 @@ class OneCycleLr:
                 rate = (min_lr - self.max_lr / 100) / (cycle_length - step - 2)
 
 
+def lr_finder(
+    model: tf.keras.Model,
+    optimizer: tf.keras.optimizers.Optimizer,
+    loss_fn: tf.keras.losses.Loss,
+    dataset,
+    learn_rates: LrGenerator,
+    losses: SmoothedLoss,
+) -> Lr:
+    for lr, (source, target) in zip(learn_rates(), dataset):
+        tf.keras.backend.set_value(optimizer.lr, lr)
+        loss = train_step(model, optimizer, loss_fn, source, target).numpy()
+        losses.update(loss)
+        if losses.no_progress:
+            break
+
+    return Lr(learn_rates, losses)
+
+
 def learner(
     model: tf.keras.Model,
     optimizer: tf.keras.optimizers.Optimizer,
     loss_fn: tf.keras.losses.Loss,
     dataset,
     learn_rates: OneCycleLr,
+    losses: Any,
+    dataset_test=None,
 ):
 
-    data_gen = (data for _ in range(learn_rates.n_epochs) for data in dataset)
-    losses = []
-    for lr, (source, target) in zip(learn_rates(), data_gen):
-        tf.keras.backend.set_value(optimizer.lr, lr)
-        loss = train_step(model, optimizer, loss_fn, source, target).numpy()
-        losses.append(loss)
+    rates_iter = iter(learn_rates())
+    for epoch in range(learn_rates.n_epochs):
+        for src, trg in dataset:
+            tf.keras.backend.set_value(optimizer.lr, next(rates_iter))
+            loss = train_step(model, optimizer, loss_fn, src, trg).numpy()
+            losses.update_train(loss)
+
+        if dataset_test is not None:
+            for s, t in dataset_test:
+                test_loss = test_step(model, loss_fn, s, t)
+                losses.update_test(test_loss)
+
+        losses.finish_epoch(epoch)
+
     return losses
-
-
-@tf.function
-def train_step(
-    model, optimizer, loss_fn, source: tf.Tensor, target: tf.Tensor
-) -> tf.Tensor:
-    with tf.GradientTape() as tape:
-        loss = loss_fn(target, model(source))
-        grads = tape.gradient(loss, model.trainable_weights)
-
-    optimizer.apply_gradients(zip(grads, model.trainable_weights))
-    return loss
