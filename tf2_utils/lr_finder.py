@@ -148,6 +148,10 @@ def lr_finder(
     learn_rates: LrGenerator,
     losses: SmoothedLoss,
 ) -> Lr:
+    # To run the lr finder directly before training, we need to reset
+    # the initial weights. Here, I do it with building, storing and resetting.
+    model.build(dataset.element_spec[0].shape)
+    weights = model.get_weights()
     for lr, (source, target) in zip(learn_rates(), dataset):
         tf.keras.backend.set_value(optimizer.lr, lr)
         loss = train_step(model, optimizer, loss_fn, source, target).numpy()
@@ -155,6 +159,7 @@ def lr_finder(
         if losses.no_progress:
             break
 
+    model.set_weights(weights)
     return Lr(learn_rates, losses)
 
 

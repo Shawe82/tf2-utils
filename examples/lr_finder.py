@@ -44,7 +44,7 @@ if __name__ == "__main__":
     lrs = LrGenerator(min_lr=1e-4, max_lr=10, n_steps=200)
     losses = SmoothedLoss(0.98)
     lr = lr_finder(model, optimizer, loss_object, dataset, lrs, losses)
-    model.reset_states()
+    #model.reset_states()
     # lr.plot_smoothed()
 
     rater = OneCycleLr(

@@ -16,3 +16,4 @@ def train_step(
 @tf.function
 def test_step(model, loss_fn, source: tf.Tensor, target: tf.Tensor) -> tf.Tensor:
     return loss_fn(target, model(source))
+
