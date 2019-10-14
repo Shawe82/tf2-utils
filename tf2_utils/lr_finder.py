@@ -33,7 +33,10 @@ class SmoothedLoss:
 
     @property
     def no_progress(self):
-        return self._smoothed_losses[-1] > 4 * self._best_loss
+        return (
+            len(self._smoothed_losses)
+            and self._smoothed_losses[-1] > 4 * self._best_loss
+        )
 
 
 @dataclass
@@ -49,8 +52,8 @@ class LrGenerator:
             learning_rate = self.min_lr * (self.max_lr / self.min_lr) ** (
                 step / (self.n_steps - 1)
             )
-            self._lrs.append(learning_rate)
             yield learning_rate
+            self._lrs.append(learning_rate)
 
     @property
     def lrs(self) -> List[float]:
@@ -155,9 +158,9 @@ def lr_finder(
     for lr, (source, target) in zip(learn_rates(), dataset):
         tf.keras.backend.set_value(optimizer.lr, lr)
         loss = train_step(model, optimizer, loss_fn, source, target).numpy()
-        losses.update(loss)
         if losses.no_progress:
             break
+        losses.update(loss)
 
     model.set_weights(weights)
     return Lr(learn_rates, losses)
