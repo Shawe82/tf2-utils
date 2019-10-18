@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Any
+from typing import List, Any, Tuple, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,7 +15,7 @@ class SmoothedLoss:
     _losses: List[float] = field(init=False, default_factory=list)
     _smoothed_losses: List[float] = field(init=False, default_factory=list)
     _avg_loss: float = field(init=False, default=0)
-    _best_loss: float = field(init=False, default=None)
+    _best_loss: Optional[float] = field(init=False, default=None)
 
     def update(self, loss):
         self._avg_loss = self.smoothing * self._avg_loss + (1 - self.smoothing) * loss
@@ -64,8 +64,8 @@ class LrGenerator:
 class Lr:
     lr: LrGenerator
     loss: SmoothedLoss
-    _opt_idx_s: int = field(init=False, default=None)
-    _opt_idx_m: int = field(init=False, default=None)
+    _opt_idx_s: Optional[int] = field(init=False, default=None)
+    _opt_idx_m: Optional[int] = field(init=False, default=None)
 
     @property
     def opt_idx_steep(self):
@@ -179,13 +179,14 @@ def learner(
     rates_iter = iter(learn_rates())
     for epoch in range(learn_rates.n_epochs):
         for src, trg in dataset:
-            tf.keras.backend.set_value(optimizer.lr, next(rates_iter))
-            loss = train_step(model, optimizer, loss_fn, src, trg).numpy()
+            lr = next(rates_iter)
+            tf.keras.backend.set_value(optimizer.lr, lr)
+            loss = train_step(model, optimizer, loss_fn, src, trg)
             losses.update_train(loss)
 
         if dataset_test is not None:
-            for s, t in dataset_test:
-                test_loss = test_step(model, loss_fn, s, t)
+            for src, trg in dataset_test:
+                test_loss = test_step(model, loss_fn, src, trg)
                 losses.update_test(test_loss)
 
         losses.finish_epoch(epoch)
